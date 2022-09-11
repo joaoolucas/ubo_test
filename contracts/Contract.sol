@@ -2,10 +2,36 @@
 
 pragma solidity >=0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
+interface IERC20 {
+    function balanceOf(address account) external view returns (uint256);
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool);
+
+    function approve(address spender, uint amount) external returns (bool);
+
+    function transfer(address to, uint256 amount) external returns (bool);
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+}
+
 contract Contract is ReentrancyGuard {
+    mapping(uint256 => uint256) public challengeCount;
+    mapping(address => bool) isProfessor;
+    mapping(address => bool) hasAccount;
+    mapping(uint256 => Course) public courses;
+    mapping(bytes32 => address) public whitelistedTokens;
+    mapping(address => mapping(bytes32 => uint256)) public accountBalances;
+
+    constructor() {
+        owner = msg.sender;
+    }
+
     event CourseAdded(
         string name,
         address courseOwner,
@@ -51,51 +77,26 @@ contract Contract is ReentrancyGuard {
     uint256 studentCount;
     Course[] public allCourses;
 
-    constructor() {
-        owner = msg.sender;
-    }
-
-    mapping(uint256 => uint256) public challengeCount;
-    mapping(address => bool) isProfessor;
-    mapping(address => bool) hasAccount;
-    mapping(uint256 => Course) public courses;
-
-    //mapping of tokens allowed to be deposited on this contract
-    //bytes32 -> symbol of the token
-    //address -> address of the token contract
-    mapping(bytes32 => address) public allowedListTokens;
-    //it checks how much token has been deposited from each wallet using this contract
-    mapping(address => mapping(bytes32 => uint256))
-        public accountBalancesDeposited;
-
-    //it allows a token to the contract
-    function allowedListToken(bytes32 symbol, address tokenAddress) external {
+    function whitelistTokens(bytes32 symbol, address tokenAddress) external {
         require(msg.sender == owner, "This function is not public");
-
-        allowedListTokens[symbol] = tokenAddress;
+        whitelistedTokens[symbol] = tokenAddress;
     }
 
-    //it deposits tokens to the contract
     function depositTokens(uint256 amount, bytes32 symbol) external {
-        accountBalancesDeposited[msg.sender][symbol] += amount;
-        ERC20(allowedListTokens[symbol]).transferFrom(
+        accountBalances[msg.sender][symbol] += amount;
+        IERC20(whitelistedTokens[symbol]).transferFrom(
             msg.sender,
             address(this),
             amount
         );
     }
 
-    function withdrawTokens(uint256 amount, bytes32 symbol)
-        external
-        nonReentrant
-    {
+    function withdrawTokens(uint256 amount, bytes32 symbol) external {
         require(
-            accountBalancesDeposited[msg.sender][symbol] >= amount,
-            "Insufficent funds"
+            accountBalances[msg.sender][symbol] >= amount,
+            "Insufficient funds"
         );
-
-        accountBalancesDeposited[msg.sender][symbol] -= amount;
-        ERC20(allowedListTokens[symbol]).transfer(msg.sender, amount);
+        IERC20(whitelistedTokens[symbol]).transfer(msg.sender, amount);
     }
 
     function addProfessor(address myAddress) public {
@@ -120,6 +121,11 @@ contract Contract is ReentrancyGuard {
         courses[courseCount].totalStaked = stakeAmount;
         courses[courseCount].stakedTokenAddress = tokenAddress;
         courses[courseCount].courseId = courseCount;
+        IERC20(courses[courseCount].stakedTokenAddress).transferFrom(
+            tokenAddress,
+            msg.sender,
+            stakeAmount
+        );
         emit CourseAdded(
             name,
             ownerAddress,
@@ -183,32 +189,18 @@ contract Contract is ReentrancyGuard {
         );
     }
 
-    // function Claim(uint256 challengeId, uint256 courseId)
-    //     public
-    // // address tokenAddress
-    // {
-    //     require(
-    //         courses[courseId].Challenges[challengeId].studentStatus[
-    //             msg.sender
-    //         ] == Status.Validated
-    //     );
-    //     courses[courseId].Challenges[challengeId].studentStatus[
-    //         msg.sender
-    //     ] = Status.Claimed;
-
-    //     ERC20.transfer(
-    //         msg.sender,
-    //         courses[courseId].Challenges[challengeCount[courseId]].rewardAmount
-    //     );
-    // }
+    function Claim(uint256 challengeId, uint256 courseId) public {
+        require(
+            courses[courseId].Challenges[challengeId].studentStatus[
+                msg.sender
+            ] == Status.Validated
+        );
+        courses[courseId].Challenges[challengeId].studentStatus[
+            msg.sender
+        ] = Status.Claimed;
+        IERC20(courses[courseCount].stakedTokenAddress).transfer(
+            msg.sender,
+            courses[courseId].Challenges[challengeCount[courseId]].rewardAmount
+        );
+    }
 }
-
-// function withdrawTokens(uint256 amount, bytes32 symbol) external nonReentrant {
-//     require(
-//         accountBalancesDeposited[msg.sender][symbol] >= amount,
-//         "Insufficent funds"
-//     );
-
-//     accountBalancesDeposited[msg.sender][symbol] -= amount;
-//     ERC20(allowedListTokens[symbol]).transfer(msg.sender, amount);
-// }

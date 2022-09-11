@@ -2,7 +2,7 @@ require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config({ path: ".env" });
 require("@nomiclabs/hardhat-etherscan");
 
-const ALCHEMY_API_KEY_URL = `https://eth-goerli.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY_URL}`;
+const ALCHEMY_API_KEY_URL = process.env.ALCHEMY_API_KEY_URL;
 
 const GOERLI_PRIVATE_KEY = process.env.GOERLI_PRIVATE_KEY;
 

@@ -20,7 +20,7 @@ interface IERC20 {
     event Transfer(address indexed from, address indexed to, uint256 value);
 }
 
-contract Contract is ReentrancyGuard {
+contract Totem is ReentrancyGuard {
     mapping(uint256 => uint256) public challengeCount;
     mapping(address => bool) isProfessor;
     mapping(address => bool) hasAccount;
@@ -34,15 +34,22 @@ contract Contract is ReentrancyGuard {
 
     event CourseAdded(
         string name,
-        address courseOwner,
+        address indexed courseOwner,
         uint256 totalStaked,
         address stakedTokenAddress,
         uint256 indexed courseId
     );
-    event StudentAdded(uint256 indexed studentId);
-    event ChallengeAdded(uint256 indexed challengeId);
-    event SubmittedChallenge();
-    event ValidatedSubmit(uint256 rewardAmount);
+
+
+
+    event StudentAdded(uint256 indexed courseId, address indexed studentAddress);
+    event ChallengeAdded(uint256 indexed challengeId, uint256 indexed courseId,uint256 challengeReward);
+    event SubmittedChallenge(uint256 indexed courseId, uint256 indexed challengeId, string asnwer);
+    event ValidatedSubmit(uint256 indexed challengeId, uint256 indexed courseId, uint256 score,uint256 rewardAmount, address indexed studentAddress);
+    event Claimed(uint256 indexed challengeId,uint256 indexed courseId, address indexed studentAddress, uint256 reward);
+
+
+
 
     enum Status {
         notSubmitted,
@@ -65,9 +72,10 @@ contract Contract is ReentrancyGuard {
 
     struct Challenge {
         mapping(address => Status) studentStatus;
+        mapping(address => uint256) studentReward;
         uint256 rewardAmount;
         uint256 challengeId;
-        string storedAnswer;
+        mapping(address => string) storedAnswer;
     }
 
     Status public status;
@@ -99,9 +107,6 @@ contract Contract is ReentrancyGuard {
         IERC20(whitelistedTokens[symbol]).transfer(msg.sender, amount);
     }
 
-    function addProfessor(address myAddress) public {
-        isProfessor[myAddress] = true;
-    }
 
     function addCourse(
         string memory name,
@@ -109,9 +114,10 @@ contract Contract is ReentrancyGuard {
         uint256 stakeAmount,
         address tokenAddress
     ) public {
-        require(
-            !isProfessor[msg.sender],
-            "You have to be a Professor to create a course"
+        IERC20(tokenAddress).transferFrom(
+            msg.sender,
+            address(this),
+            stakeAmount
         );
         courseCount++;
         courses[courseCount].name = name;
@@ -121,11 +127,7 @@ contract Contract is ReentrancyGuard {
         courses[courseCount].totalStaked = stakeAmount;
         courses[courseCount].stakedTokenAddress = tokenAddress;
         courses[courseCount].courseId = courseCount;
-        IERC20(courses[courseCount].stakedTokenAddress).transferFrom(
-            tokenAddress,
-            msg.sender,
-            stakeAmount
-        );
+    
         emit CourseAdded(
             name,
             ownerAddress,
@@ -135,22 +137,20 @@ contract Contract is ReentrancyGuard {
         );
     }
 
-    function addStudents() public {
-        require(!hasAccount[msg.sender], "Address already has account");
-        studentCount++;
-        hasAccount[msg.sender] = true;
-        courses[courseCount].studentId = studentCount;
-        emit StudentAdded(studentCount);
+    function addStudents(address studentAddress, uint256 courseId) public {
+        require(courses[courseId].courseOwner == msg.sender, "You're not the professor of this Course");
+        courses[courseId].students[studentAddress] = true;
+        emit StudentAdded(courseId, studentAddress);
     }
 
     function addChallenge(uint256 courseId, uint256 challengeReward) public {
-        require(!isProfessor[msg.sender], "You're not a professor");
-        challengeCount[courseId]++;
-        courses[courseId].Challenges[challengeCount[courseId]];
+        require(courses[courseId].courseOwner == msg.sender, "You're not the professor of this Course");
+        challengeCount[courseId]=challengeCount[courseId]+1;
+        // courses[courseId].Challenges[challengeCount[courseId]];
         courses[courseId]
             .Challenges[challengeCount[courseId]]
             .rewardAmount = challengeReward;
-        emit ChallengeAdded(challengeCount[courseId]);
+        emit ChallengeAdded(challengeCount[courseId], courseId, challengeReward);
     }
 
     function submitChallenge(
@@ -158,34 +158,39 @@ contract Contract is ReentrancyGuard {
         uint256 courseId,
         uint256 challengeId
     ) public {
+        //add only student require
+        require(courses[courseId].students[msg.sender] = true, 'Address not a student of this Course');
+        //require that challenge exists
+        require(courses[courseId].Challenges[challengeId].rewardAmount > 0, 'Challenge doesnt Exist');
         courses[courseId].Challenges[challengeId].studentStatus[
             msg.sender
         ] = Status.Submitted;
         courses[courseId]
-            .Challenges[challengeCount[courseId]]
-            .storedAnswer = answer;
-        emit SubmittedChallenge();
+            .Challenges[challengeId]
+            .storedAnswer[msg.sender] = answer;
+        emit SubmittedChallenge(courseId, challengeId, answer);
     }
 
     function validateSubmit(
         uint256 challengeId,
         uint256 courseId,
-        uint256 score
+        uint256 score,
+        address studentAddress
     ) public {
-        require(!isProfessor[msg.sender], "You're not a professor");
+        require(courses[courseId].courseOwner == msg.sender, "You're not the professor of this Course");
         require(
             courses[courseId].Challenges[challengeId].studentStatus[
-                msg.sender
+                studentAddress
             ] == Status.Submitted
         );
         courses[courseId].Challenges[challengeId].studentStatus[
-            msg.sender
+            studentAddress
         ] = Status.Validated;
-        courses[courseId].Challenges[challengeCount[courseId]].rewardAmount =
-            (score / 100) *
-            courses[courseId].Challenges[challengeCount[courseId]].rewardAmount;
-        emit ValidatedSubmit(
-            courses[courseId].Challenges[challengeCount[courseId]].rewardAmount
+        courses[courseId].Challenges[challengeId].studentReward[studentAddress] =
+            (score *
+            courses[courseId].Challenges[challengeId].rewardAmount)/100;
+        emit ValidatedSubmit(challengeId, courseId,score,
+            courses[courseId].Challenges[challengeId].rewardAmount , studentAddress
         );
     }
 
@@ -200,7 +205,18 @@ contract Contract is ReentrancyGuard {
         ] = Status.Claimed;
         IERC20(courses[courseCount].stakedTokenAddress).transfer(
             msg.sender,
-            courses[courseId].Challenges[challengeCount[courseId]].rewardAmount
+            courses[courseId].Challenges[challengeId].studentReward[msg.sender]
         );
+        emit Claimed(challengeId,courseId, msg.sender, courses[courseId].Challenges[challengeId].rewardAmount);
     }
+
+    function getChallengeReward(uint256 courseId, uint256 challengeId) public view returns(uint256 reward) {
+        return courses[courseId].Challenges[challengeId].rewardAmount;
+        //  courses[courseId].Challenges[challengeCount[courseId]].rewardAmount
+    }
+
+     function getStudentReward(uint256 courseId, uint256 challengeId,  address studentAddress) public view returns(uint256 reward) {
+        return courses[courseId].Challenges[challengeId].studentReward[studentAddress];
+    }
+
 }
